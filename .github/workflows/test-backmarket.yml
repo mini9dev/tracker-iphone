@@ -1,0 +1,104 @@
+name: Test Back Market
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer le navigateur
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Examiner la fiche produit
+        run: |
+          mkdir -p diagnostic
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+
+          url = (
+              "https://www.backmarket.fr/fr-fr/p/go/"
+              "8dee5bc8-aabb-4c8b-8739-2b7db28ea365"
+          )
+          dossier = Path("diagnostic")
+
+          with sync_playwright() as p:
+              navigateur = p.chromium.launch()
+              page = navigateur.new_page(
+                  locale="fr-FR",
+                  timezone_id="Europe/Paris",
+                  viewport={"width": 1280, "height": 900},
+              )
+
+              try:
+                  reponse = page.goto(
+                      url,
+                      wait_until="domcontentloaded",
+                      timeout=60000,
+                  )
+                  print("HTTP :", reponse.status if reponse else "inconnu")
+                  page.wait_for_timeout(10000)
+
+                  texte = page.locator("body").inner_text()
+                  (dossier / "page.txt").write_text(
+                      texte, encoding="utf-8"
+                  )
+
+                  controles = page.locator(
+                      "input, [role=radio], [role=button], button, label"
+                  ).evaluate_all("""
+                      elements => elements.map(e => ({
+                          tag: e.tagName,
+                          role: e.getAttribute("role"),
+                          type: e.getAttribute("type"),
+                          id: e.id,
+                          name: e.getAttribute("name"),
+                          value: e.getAttribute("value"),
+                          checked: e.checked ?? null,
+                          ariaChecked: e.getAttribute("aria-checked"),
+                          ariaLabel: e.getAttribute("aria-label"),
+                          text: (e.innerText || "").trim().slice(0, 300),
+                          labels: Array.from(e.labels || [])
+                              .map(l => l.innerText.trim())
+                      }))
+                  """)
+                  (dossier / "controles.json").write_text(
+                      json.dumps(controles, ensure_ascii=False, indent=2),
+                      encoding="utf-8",
+                  )
+                  page.screenshot(
+                      path=str(dossier / "capture.png"),
+                      full_page=True,
+                  )
+
+                  print("Titre :", page.title())
+                  print("Adresse finale :", page.url)
+                  print("Début du texte :")
+                  print(texte[:1500])
+
+              finally:
+                  navigateur.close()
+          PY
+
+      - name: Conserver le diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-backmarket
+          path: diagnostic/
+          retention-days: 3
+          if-no-files-found: warn
