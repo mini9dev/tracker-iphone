@@ -25,7 +25,7 @@ jobs:
       - name: Examiner la fiche produit
         run: |
           mkdir -p diagnostic
-          python - <<'PY'
+          xvfb-run -a python - <<'PY'
           import json
           from pathlib import Path
           from playwright.sync_api import sync_playwright
@@ -37,7 +37,7 @@ jobs:
           dossier = Path("diagnostic")
 
           with sync_playwright() as p:
-              navigateur = p.chromium.launch()
+              navigateur = p.chromium.launch(headless=False)
               page = navigateur.new_page(
                   locale="fr-FR",
                   timezone_id="Europe/Paris",
